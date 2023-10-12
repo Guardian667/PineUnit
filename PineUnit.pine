@@ -1,0 +1,1689 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Guardian667
+
+//@version=5
+
+// @description A comprehensive testing framework for Pine Script on TradingView. Built with well-known testing paradigms like Assertions, Units and Suites. It offers the ability to log test results in TradingView's built-in Pine Protocol view, as well as displaying them in a compact table directly on your chart, ensuring your scripts are both robust and reliable.
+library("PineUnit")
+
+//#region ===== Equals functionailty 
+equalsNa(bool a, bool b) =>
+    na(a) and na(b) or a == b
+
+equalsNa(int a, int b) =>
+    na(a) and na(b) or a == b
+
+decimalPlacesCount(float f) =>
+    result = 0
+    parts = str.split(str.tostring(f), ".")
+    if parts.size() == 2
+        result := str.length(parts.get(1))
+    result
+
+equalsNa(float a, float b) =>
+    epsilon = 0.0000000001
+    absA = math.abs(a)
+    absB = math.abs(b)
+    diff = math.abs(a - b)
+    if (a == b)
+        true
+    else if (absA < 1.0 and absB < 1.0)
+        diff < epsilon
+    else
+        diff / (absA + absB) < epsilon
+
+equalsNa(string a, string b) =>
+    na(a) and na(b) or a == b
+
+arrayEqualsNa(array<bool> a, array<bool> b) =>
+    ana = na(a)
+    bna = na(b)
+    result = true
+    if not (ana and bna)
+        if ana != bna
+            result := false
+        else if array.size(a) != array.size(b)
+            result := false
+        else
+            for [i, v] in a
+                if not equalsNa(v, array.get(b, i))
+                    result := false
+                    break
+    result
+
+arrayEqualsNa(array<int> a, array<int> b) =>
+    ana = na(a)
+    bna = na(b)
+    result = true
+    if not (ana and bna)
+        if ana != bna
+            result :=false
+        else if array.size(a) != array.size(b)
+            result :=false
+        else
+            result := true
+            for [i, v] in a
+                if not equalsNa(v, array.get(b, i))
+                    result := false
+                    break
+    result
+
+arrayEqualsNa(array<float> a, array<float> b) =>
+    ana = na(a)
+    bna = na(b)
+    result = true
+    if not (ana and bna)
+        if ana != bna
+            result := false
+        else if array.size(a) != array.size(b)
+            result := false
+        else
+            for [i, v] in a
+                if not equalsNa(v, array.get(b, i))
+                    result := false
+                    break
+    result
+
+arrayEqualsNa(array<string> a, array<string> b) =>
+    ana = na(a)
+    bna = na(b)
+    result = true
+    if not (ana and bna)
+        if ana != bna
+            result := false
+        else if array.size(a) != array.size(b)
+            result := false
+        else
+            for [i, v] in a
+                if not equalsNa(v, array.get(b, i))
+                    result := false
+                    break
+    result
+//#endregion
+
+//#region ===== Results 
+//#region === TestId  
+// @type  A unique identifier for a test, composed of the names of the suite, unit, and the test itself.
+// @field suiteName The name of the Suite
+// @field unitName  The name of the Unit
+// @field testName  The name of the Test
+export type TestId
+    string suiteName = na
+    string unitName = na
+    string testName = na
+
+method equals(TestId a, TestId b) =>
+    equalsNa(a.suiteName, b.suiteName) and equalsNa(a.unitName, b.unitName) and equalsNa(a.testName, b.testName)
+
+method toString(TestId id) =>
+    (na(id.suiteName) ? na : id.suiteName + " / ")  + (na(id.unitName) ? na : id.unitName + " / ") + id.testName
+
+contains(array<TestId> ids, TestId id) =>
+    result = false
+    for [i, v] in ids
+        if equals(v, id)
+            result := true
+            break
+    result
+
+contains(array<string> a, string s) =>
+    result = false
+    for [i, v] in a
+        if equalsNa(v, s)
+            result := true
+            break
+    result
+//#endregion
+
+//#region === ResultState
+// @type The result state for a Test, Unit, Suite or Session. a TestResult is directly reflected. For other types those prioritised rules apply: 1. If one or more tests fail -> Failure | 2. If all tests (excluding ignored ones) pass -> Success | 3. If all tests are ignored -> Ignored | 4. If one or more tests aren't executed -> Unexecuted
+// @field state An internal integer that represents the state
+export type ResultState
+    int state = 4
+
+Success() =>
+    ResultState.new(1)
+
+method isSuccess(ResultState this) =>
+    this.state == 1
+
+Failure() =>
+    ResultState.new(2)
+
+method isFailure(ResultState this) =>
+    this.state == 2
+
+Ignored() =>
+    ResultState.new(3)
+
+method isIgnored(ResultState this) =>
+    this.state == 3
+
+Unexecuted() =>
+    ResultState.new(4)
+
+method isUnexecuted(ResultState this) =>
+    this.state == 4
+//#endregion
+
+//#region === TestFailure
+// @type A TestFailure shows what has been gone wrong on which bar at which time during a test
+// @field barIndex In case of a test of a series Unit, the bar_index on which the failure was detected
+// @field stamp    In case of a test of a series Unit, the time of the bar on which the failure was detected
+// @field messages A message, that describes what has been gone wrong
+export type TestFailure
+    int barIndex = na
+    int stamp = na
+    array<string> messages = na
+//#endregion
+
+//#region === TestResult
+// @type A TestResult shows if a test was successful or not and cal hold a list of TestFailures that describe what went wrong
+// @field id A TestId that identifies to which test resul is described
+// @field state The ResultState of a Test
+// @field failures A list of TestFailures which describe what went wrong
+export type TestResult
+    TestId id = na
+    bool isSeries = false
+    ResultState state = na
+    array<TestFailure> failures = na
+
+createTestResult(TestId id, bool isSeries) =>
+    TestResult.new(id, isSeries, ResultState.new(), failures = array.new<TestFailure>())
+
+method createSimpleFailure(TestResult this) =>
+    TestFailure result = TestFailure.new(na, na, array.new_string())
+    this.failures.push(result)
+    result
+
+method getCurrentFailure(TestResult this) =>
+    TestFailure result = na 
+    if this.failures.size() > 0
+        last = this.failures.last()
+        if equalsNa(last.barIndex, bar_index)
+            result := last
+    result
+
+method getOrCreateCurrentFailure(TestResult this) =>
+    TestFailure result = this.getCurrentFailure()
+    if na(result)
+        result := TestFailure.new(bar_index, time, array.new_string())
+        this.failures.push(result)
+    result
+//#endregion
+
+//#region ReusltCounts
+// @type A DataCapsule to maintain counts of test results for inner computation
+// @field successes The number of successful items
+// @field failures The number of failed items
+// @field ignoreds The number of ignored items
+// @field unexecuteds The number of unexecuted items
+export type ResultCounts
+    int successes = 0
+    int failures = 0
+    int ignoreds = 0
+    int unexecuteds = 0
+
+method add(ResultCounts this, ResultCounts counts) =>
+    this.successes += counts.successes
+    this.failures += counts.failures
+    this.ignoreds += counts.ignoreds
+    this.unexecuteds += counts.unexecuteds
+
+method getCount(ResultCounts this) =>
+    this.successes + this.failures + this.ignoreds + this.unexecuteds
+
+method getRun(ResultCounts this) =>
+    this.successes + this.failures
+//#endregion
+
+//#region === UnitResult
+// @type The TestResult of a whole Unit
+// @field name The name of this Unit
+// @field state The ResultState of this Unit
+// @field results All TestResults of the Tests of this Unit
+// @field testCounts A summary of the TestResult counts 
+export type UnitResult
+    string name
+    ResultState state = na
+    array<TestResult> results
+    ResultCounts testCounts = na
+
+method createUnitResult(string name) =>
+    UnitResult.new(name, ResultState.new(), array.new<TestResult>(), ResultCounts.new())
+
+method add(UnitResult this, TestResult testResult) =>
+    if na(this) or na(testResult)
+        runtime.error("add(UnitResult this, TestResult testResult) " + (na(this) ? "this == na" : na(testResult) ? "testResult == na" : ""))
+    this.results.push(testResult)
+    if testResult.state.isSuccess()
+        this.testCounts.successes += 1
+    if testResult.state.isFailure()
+        this.testCounts.failures += 1
+    if testResult.state.isIgnored()
+        this.testCounts.ignoreds += 1
+    if testResult.state.isUnexecuted()
+        this.testCounts.unexecuteds += 1
+
+method updateState(UnitResult this) =>
+    bool atLeastOneExecuted = false
+    for [i, r] in this.results
+        if r.state.isFailure()
+            this.state := Failure()
+            break
+        if not r.state.isUnexecuted()
+            atLeastOneExecuted := true
+            continue
+    counts = this.testCounts
+    if counts.unexecuteds > 0 and counts.getRun() == 0
+        this.state := Unexecuted()
+    else if counts.ignoreds > 0 and counts.getRun() == 0
+        this.state := Ignored()
+    else if counts.successes == counts.getCount() - counts.ignoreds
+        this.state := Success()
+
+method getResultCounts(UnitResult this) =>
+    this.testCounts
+//#endregion
+
+//#region === SuiteResult
+// @type The TestResult of a whole Suite
+// @field name The name of this Suite
+// @field state The ResultState of this Suite
+// @field results All UnitResults of the Units of this Suite
+// @field testCounts A summary of the TestResult counts 
+export type SuiteResult
+    string name
+    ResultState state = na
+    array<UnitResult> results
+    ResultCounts testCounts = na
+
+method createSuiteResult(string name) =>
+    SuiteResult.new(name, ResultState.new(),array.new<UnitResult>(), ResultCounts.new())
+
+method add(SuiteResult this, UnitResult unitResult) =>
+    this.results.push(unitResult)
+    this.testCounts.add(unitResult.testCounts)
+
+method updateState(SuiteResult this) =>
+    bool atLeastOneExecuted = false
+    for [i, r] in this.results
+        if r.state.isFailure()
+            this.state := Failure()
+            break
+        if not r.state.isUnexecuted()
+            atLeastOneExecuted := true
+            continue
+    counts = this.testCounts
+    if counts.unexecuteds > 0 and counts.getRun() == 0
+        this.state := Unexecuted()
+    else if counts.ignoreds > 0 and counts.getRun() == 0
+        this.state := Ignored()
+    else if counts.successes == counts.getCount() - counts.ignoreds
+        this.state := Success()
+//#endregion
+
+//#region === SessionResult
+// @type The overall test reuslt of a TestSession
+// @field state The overall ResultState of a TestSession
+// @field All SuiteResults of the Tests of a whole TestSession
+// @field testCounts A summary of the TestResult counts 
+export type SessionResult
+    ResultState state = na
+    array<SuiteResult> results
+    ResultCounts testCounts = na
+
+method add(SessionResult this, SuiteResult suiteResult) =>
+    this.results.push(suiteResult)
+    this.testCounts.add(suiteResult.testCounts)
+
+method updateState(SessionResult this) =>
+    bool atLeastOneExecuted = false
+    for [i, r] in this.results
+        if r.state.isFailure()
+            this.state := Failure()
+            break
+        if not r.state.isUnexecuted()
+            atLeastOneExecuted := true
+            continue
+    counts = this.testCounts
+    if counts.unexecuteds > 0 and counts.getRun() == 0
+        this.state := Unexecuted()
+    else if counts.ignoreds > 0 and counts.getRun() == 0
+        this.state := Ignored()
+    else if counts.successes == counts.getCount() - counts.ignoreds
+        this.state := Success()
+
+method getResultCounts(SessionResult this) =>
+    this.testCounts
+
+createSessionResult() =>
+    SessionResult.new(ResultState.new(), array.new<SuiteResult>(), ResultCounts.new())
+
+method getSuiteResult(SessionResult sessionResult, string name) =>
+    SuiteResult result = na
+    for [i, r] in sessionResult.results
+        if equalsNa(r.name, name)
+            result := r
+            break
+    result
+
+method containsSuiteResult(SessionResult sessionResult, string name) =>
+    not na(sessionResult.getSuiteResult(name))
+
+method createSuiteResult(SessionResult sessionResult, string name) =>
+    if containsSuiteResult(sessionResult, name)
+        runtime.error("createSuiteResult(): SuiteResult " + name + " already contained in SessionResult")
+    result = createSuiteResult(name)
+    sessionResult.results.push(result)
+    result
+
+method getOrCreateSuiteResult(SessionResult sessionResult, string name) =>
+    SuiteResult result = na
+    for [i, r] in sessionResult.results
+        if equalsNa(r.name, name)
+            result := r
+            break
+    if na(result)
+        result := sessionResult.createSuiteResult(name)
+    result
+
+method containsUnitResult(SuiteResult suiteResult, string name) =>
+    contains = false
+    for [i, r] in suiteResult.results
+        if equalsNa(r.name, name)
+            contains := true
+            break
+    contains
+
+method createUnitResult(SuiteResult suiteResult, string name) =>
+    if containsUnitResult(suiteResult, name)
+        runtime.error("createUnitResult(): UnitResult " + name + " already contained in SuiteResult " + suiteResult.name)
+    result = createUnitResult(name)
+    suiteResult.results.push(result)
+    result
+
+method getOrCreateUnitResult(SuiteResult suiteResult, string name) =>
+    UnitResult result = na
+    for [i, r] in suiteResult.results
+        if equalsNa(r.name, name)
+            result := r
+            break
+    if na(result)
+        result := suiteResult.createUnitResult(name)
+    result
+//#endregion
+//#endregion
+
+//#region ===== Test Classes 
+//#region === DisplaySettings
+// @type Configuration of the result table that is shown on the chart
+// @field show If true an in chart table with the test results is displayed. Default: true
+// @field position Defines where the Results are displayed. Use Pine Script's position const strings. Default: position.top_right
+// @field success When true, successful tests are displayed, Default: true
+// @field failure When true, failures tests are displayed. Default: true
+// @field ignored When true, ignored tests are displayed, Default: true
+// @field unexecuted When true, unexecuted tests are displayed. Default: true
+// @field textSize The textSize within the result display. Use Pine Script's size const string. Default: size.small
+export type DisplaySettings
+    bool show = true
+    string position = position.top_right
+    string textSize = size.small
+    bool success = true
+    bool failure = true
+    bool ignored = true
+    bool unexecuted = true
+
+// @function If set to true an in chart table with the test results is displayed
+export method setShow(DisplaySettings this, bool show) =>
+    this.show := show
+    this
+
+// @function The chart table with the test results is not displayed
+export method hide(DisplaySettings this) =>
+    this.setShow(false)
+
+// @function Sets the text size within the result display. Use Pine Script's const position string. Default: size-small
+export method setTextSize(DisplaySettings this, string textSize) =>
+    this.textSize := textSize
+    this
+
+// @function Sets the position of the result display. Use Pine Script's const position string. Default: position.top_right
+export method setPosition(DisplaySettings this, string position) =>
+    this.position := position
+    this
+
+// @function Defines if successful tests are displayed within the result display on the chart
+export method setShowSuccess(DisplaySettings this, bool show) =>
+    this.success := show
+    this
+
+// @function Hides successful tests within the result display on the chart
+export method hideSuccess(DisplaySettings this) =>
+    this.setShowSuccess(false)
+
+// @function Defines if failed tests are displayed within the result display on the chart
+export method setShowFailure(DisplaySettings this, bool show) =>
+    this.failure := show
+    this
+
+// @function Shows only failed tests within the result display on the chart
+export method showOnlyFailures(DisplaySettings this) =>
+    this.success := false
+    this.ignored := false
+    this.unexecuted := false
+    this
+
+// @function Defines if ignored tests are displayed within the result display on the chart
+export method setShowIgnored(DisplaySettings this, bool show) =>
+    this.ignored := show
+    this
+
+// @function Hides ignored tests within the result display on the chart
+export method hideIgnored(DisplaySettings this) =>
+    this.setShowIgnored(false)
+
+// @function Defines if unexeucted tests are displayed within the result display on the chart
+export method setShowUnexecuted(DisplaySettings this, bool show) =>
+    this.unexecuted := show
+    this
+
+// @function Hides ignored tests within the result display on the chart
+export method hideUnexecuted(DisplaySettings this) =>
+    this.setShowUnexecuted(false)
+//#endregion
+
+//#region TestSesstion
+// @type A TestSession encapsulates the configuration of the test and holds all the test results
+// @field active If and only if true, the assertions are executed and the Results are displayed
+// @field maxFailingBars The maximum amount of bars on wich a test can fail. If that number is reached not more test results are logged. Default: 1
+// @field timezone The timezone in which the bartime when a failure occured is displayed (Examples: "UTC", "Europe/Berlin"). Default: "UTC"
+// @field logBarOnSeriesTests Defines if the bar_index and the bar time is shown on failed test executions of series-based Tests
+// @field results A list of all Results which have been created during test executions
+// @field displaySettings The DisplaySettings define if and how the test results are displayed on the chart
+// @field containedSuites The Suites which have been created directly on this TestSession
+// @field containedSuites The Unites which have been created directly on this TestSession
+// @field containedSuites The Tests which have been created directly on this TestSession
+export type TestSession
+    bool active = true
+    int maxFailingBars = 1
+    string timezone = syminfo.timezone
+    bool logBarOnSeriesTests = false
+    array<TestResult> results = na
+    DisplaySettings displaySettings = na
+    array<string> containedSuites = na
+    array<string> containedUnits = na
+    array<string> containedTests = na
+
+// @function Activates or deactivates the execution of tests.
+export method setActive(TestSession this, bool active) =>
+    if barstate.isfirst
+        this.active := active
+    this
+        
+// @function Deactivates or deactivates the execution of tests.
+export method deactivate(TestSession this) =>
+    this.setActive(false)
+
+// @function Defines how often series test is executed until a maximum amount of test failures occured. Default: 1
+export method setMaxFailingBars(TestSession this, int max) =>
+    if max < 1
+        runtime.error("PineTest.setMaxFailingBars: At least 1 failure must be storable for series based tests, but " + str.tostring(max) + " given")
+    this.maxFailingBars := max
+    this
+
+// @function Sets the timezone that is used to display the bartime when a failure occurs
+export method setTimezone(TestSession this, string timezone) =>
+    this.timezone := timezone
+    this
+
+// @function Defines if the bar_index and the bar time is shown on failed test executions of series-based Tests
+export method setLogBarOnSeriesTests(TestSession this, bool logBar) =>
+    this.logBarOnSeriesTests := logBar
+    this
+
+method containsSuite(TestSession this, string name) =>
+    bool result = false
+    for [i, n] in this.containedSuites
+        if equalsNa(n, name)
+            result := true
+    result
+
+method containsUnit(TestSession this, string name) =>
+    bool result = false
+    for [i, n] in this.containedUnits
+        if equalsNa(n, name)
+            result := true
+    result
+
+method containsTest(TestSession this, string name) =>
+    bool result = false
+    for [i, n] in this.containedTests
+        if equalsNa(n, name)
+            result := true
+    result
+
+method getTestResult(TestSession this, TestId id) =>
+    TestResult result = na
+    for [i, r] in this.results
+        if r.id.equals(id)
+            result := r
+    result
+
+method getTestIds(TestSession this) =>
+    ids = array.new<TestId>(0)
+    for [i, r] in this.results
+        ids.push(r.id)
+    ids
+
+method getSuiteNames(TestSession this) =>
+    names = array.new_string(0)
+    for [i, r] in this.results
+        if not contains(names, r.id.suiteName)
+            names.push(r.id.suiteName)
+    names.sort()
+    names
+
+method getUnitNames(TestSession this, string suiteName) =>
+    names = array.new_string(0)
+    for [i, r] in this.results
+        if equalsNa(r.id.suiteName, suiteName) and not contains(names, r.id.unitName)
+            names.push(r.id.unitName)
+    names.sort()
+    names
+
+method getTestNames(TestSession this, string suiteName, string unitName) =>
+    names = array.new_string(0)
+    for [i, r] in this.results
+        if equalsNa(r.id.suiteName, suiteName) and equalsNa(r.id.unitName, unitName) and not contains(names, r.id.testName)
+            names.push(r.id.testName)
+    names.sort()
+    names
+
+method createSessionResult(TestSession this) =>
+    sessionResult = createSessionResult()
+    for [si, sn] in this.getSuiteNames()
+        suiteResult = createSuiteResult(sn)
+        for [ui, un] in this.getUnitNames(sn)
+            unitResult = createUnitResult(un)
+            for [ti, tn] in this.getTestNames(sn, un)
+                testResult = this.getTestResult(TestId.new(sn, un, tn))
+                unitResult.add(testResult)
+            unitResult.updateState()
+            suiteResult.add(unitResult)
+        suiteResult.updateState()
+        sessionResult.add(suiteResult)
+    sessionResult.updateState()
+    sessionResult
+
+method matches(ResultState this, DisplaySettings settings) =>
+    settings.success and this.isSuccess()
+      or settings.failure and this.isFailure()
+      or settings.ignored and this.isIgnored()
+      or settings.unexecuted and this.isUnexecuted()
+
+method getFilteredResults(TestSession this, SessionResult sessionResult) =>
+    filtered = createSessionResult()
+    for [si, sr] in sessionResult.results
+        sc = createSuiteResult(sr.name)
+        sc.state := sr.state.copy()
+        for [ui, ur] in sr.results
+            uc = createUnitResult(ur.name)
+            uc.state := ur.state.copy()
+            for [ti, tr] in ur.results
+                tc = tr.copy()
+                if matches(tc.state, this.displaySettings)
+                    uc.add(tc)
+            if uc.results.size() > 0
+                sc.add(uc)
+        if sc.results.size() > 0
+            filtered.add(sc)
+    filtered.state := sessionResult.state.copy()
+    filtered
+
+// @function Creates a new TestSession. Use this function instead of TestSession.new() to create new Sessions, since all required variables are instantiated
+export createTestSession() =>
+    TestSession.new(results=array.new<TestResult>(0), displaySettings = DisplaySettings.new(),
+      containedSuites = array.new_string(),
+      containedUnits = array.new_string(),
+      containedTests = array.new_string())
+
+//#endregion
+
+//#region === Suite 
+// @type A Suite bundles Units, so that they are displayed under together and all of them can be executed or not with one command
+// @field testSession The TestSession in which scope the tests of this Suite are executed
+// @field name The name of this Suite
+// @field ignore If true all the tests of all of this Suites Units are not executed
+// @field containedUnites The Units which have been created directly on this Suite
+export type Suite
+    TestSession testSession = na
+    string name = na
+    bool ignore = false
+    array<string> containedUnits = na
+
+// @function A constructor to easily create a Suite within a TestSession
+export method createSuite(TestSession this, string name) =>
+    if na(name)
+        runtime.error("TestSession.createSuite: A Suite must be named, but namae == na")
+    if contains(this.containedSuites, name)
+        runtime.error("The TestSessoin already contains a Suite with name " + name)
+    this.containedSuites.push(name)
+    Suite.new(this, name, false, array.new_string())
+
+method containsUnit(Suite this, string name) =>
+    bool result = false
+    for [i, n] in this.containedUnits
+        if equalsNa(n, name)
+            result := true
+    result
+
+// @function If true, all tests of all the Units of this Suite are not executed
+export method setIgnore(Suite this, bool ignore) =>
+    this.ignore := ignore
+    this
+
+// @function Deactivates the execution of all tests of all the Units of this Suite
+export method ignore(Suite this) =>
+    this.setIgnore(true)
+    this
+
+method isIgnored(Suite suite) =>
+    suite.ignore
+//#endregion
+
+//#region === Unit 
+// @type A Unit is some kind of smallest amount of a program that is supposed to be tested, e.g. a function or the functions of a type. It is created by the method createSimpleUnit and createSeriesUnit of TestSession or Suite.
+// @field testSession The TestSession in which scope the tests of this Unit are executed
+// @field testSession The Suite in which scope the tests of this Suite are executed
+// @field name The name of this Unit
+// @field ignore If true all the tests this Unit are not executed
+// @field containedTests The Tests which have been created on this Unit
+export type Unit
+    TestSession testSession = na
+    Suite suite = na
+    string name = na
+    bool ignore = false
+    array<string> containedTests = na
+
+// @function Creates a named Unit that is used to execute tests once on simple values
+export method createUnit(TestSession this, string name) =>
+    if na(name)
+        runtime.error("TestSession.createUnit: A Unit must be named, but namae == na")
+    if contains(this.containedUnits, name)
+        runtime.error("The TestSessoin already contains a Unit with name " + name)
+    this.containedUnits.push(name)
+    Unit.new(this, na, name, false, array.new_string())
+
+// @function Creates a named Unit that is used to execute tests once on simple values
+export method createUnit(Suite this, string name) =>
+    if na(name)
+        runtime.error("Suite.createUnit: A Unit must be named, but namae == na")
+    if contains(this.containedUnits, name)
+        runtime.error("Suite " + this.name + " already contains a Unit with name " + name)
+    this.containedUnits.push(name)
+    Unit.new(this.testSession, this, name, false, array.new_string())
+
+method createTestId(Unit unit, string testName) =>
+    TestId.new(na(unit.suite) ? na : unit.suite.name, unit.name, testName)
+
+method containsTest(Unit this, string name) =>
+    bool result = false
+    for [i, n] in this.containedTests
+        if equalsNa(n, name)
+            result := true
+    result
+
+// @function If true, all tests this Unit are not executed
+export method setIgnore(Unit this, bool ignore) =>
+    this.ignore := ignore
+    this
+
+// @function Deactivates the execution of all tests of this Unit
+export method ignore(Unit this) =>
+    this.setIgnore(true)
+    this
+
+method isIgnored(Unit unit) =>
+    ignored = unit.ignore
+    if not na(unit.suite)
+        if unit.suite.isIgnored()
+            ignored := true
+    ignored
+
+method getSuiteName(Unit unit) =>
+    na(unit.suite) ? na : unit.suite.name
+//#endregion
+
+//#region === Test
+//#region = SimpleTest
+// @type A SimpleTest targets one functionality based on simple values. It is created by the method createSimpleTest and createSeriesTest of TestSession or Unit.
+// @field testSession The TestSession in which scope the assertions of this Test are executed
+// @field unit The Unit in which scope the assertions of this Test are executed
+// @field name The name of this Test
+// @field ignore If true this tests is ignored and marked as skipped
+export type SimpleTest
+    TestSession testSession = na
+    Unit unit = na
+    string name = na
+    bool ignore = false
+
+// @function Creates a named Test that is used to execute tests once on simple values
+export method createSimpleTest(TestSession this, string name) =>
+    if na(name)
+        runtime.error("TestSession.createSimpleTest: A Test must be named, but namae == na")
+    if this.containsTest(name)
+        runtime.error("The TestSessoin already contains a Test with name " + name)
+    this.containedTests.push(name)
+    SimpleTest.new(this, na, name, false)
+
+// @function Creates a named Test that is used to execute tests once on simple values
+export method createSimpleTest(Unit this, string name) =>
+    if na(name)
+        runtime.error("Unit.createSimpleTest: A Test must be named, but namae == na")
+    if this.containsTest(name)
+        runtime.error("Unit " + this.name + " already contains a Test with name " + name)
+    this.containedTests.push(name)
+    SimpleTest.new(this.testSession, this, name, false)
+
+method createTestId(SimpleTest test) =>
+    string suiteName = na
+    string unitName = na
+    if not na(test.unit)
+        unitName := test.unit.name
+        if not na(test.unit.suite)
+            suiteName := test.unit.suite.name
+    TestId.new(suiteName, unitName, test.name)
+
+method createTestResult(SimpleTest test) =>
+    createTestResult(test.createTestId(), false)
+
+// @function If true, all tests this Test are not executed
+export method setIgnore(SimpleTest this, bool ignore) =>
+    this.ignore := ignore
+    this
+
+// @function Deactivates the execution of all tests of this Test
+export method ignore(SimpleTest this) =>
+    this.setIgnore(true)
+    this
+
+method isIgnored(SimpleTest test) =>
+    ignored = test.ignore
+    if not na(test.unit)
+        if test.unit.isIgnored()
+            ignored := true
+        if not na(test.unit.suite)
+            if test.unit.suite.isIgnored()
+                ignored := true
+    ignored
+
+method getSuiteName(SimpleTest test) =>
+    test.unit.getSuiteName()
+
+method getUnitName(SimpleTest test) =>
+    test.unit.name
+
+method getFqn(SimpleTest test) =>
+    (na(test.getSuiteName()) ? "" : test.getSuiteName() + " / ")
+      + (na(test.getUnitName()) ? "" : test.getUnitName() + " / ")
+      + test.name
+//#endregion
+
+//#region = SeriesTest
+// @type A SeriesTest targets one functionality based on series values. It is created by the method createSimpleTest and createSeriesTest of TestSession or Unit.
+// @field testSession The TestSession in which scope the assertions of this Test are executed
+// @field unit The Unit in which scope the assertions of this Test are executed
+// @field name The name of this Test
+// @field when The scenario under which cirumstances the Test shall be exeucuted
+// @field sinceBar The earliest Bar on which this Test is executed. Counting begins at 1
+// @field untilBar The Bar from which on this Test is not executed anymore. Counting begins at 1
+// @field ignore If true this tests is ignored and marked as skipped
+
+export type SeriesTest
+    TestSession testSession = na
+    Unit unit = na
+    string name = na
+    bool ignore = false
+    bool when = true
+    int sinceBar = na
+    int untilBar = na
+
+// @function Creates a named Test that is used to execute tests on series values on each bar
+export method createSeriesTest(TestSession this, string name, int sinceBar = na, int untilBar = na) =>
+    if na(name)
+        runtime.error("TestSession.createSeriesTest: A Test must be named, but namae == na")
+    if this.containsTest(name)
+        runtime.error("The TestSessoin already contains a Test with name " + name)
+    this.containedTests.push(name)
+    SeriesTest.new(this, na, name, false, true, sinceBar, untilBar)
+
+// @function Creates a named Test that is used to execute tests on series values on each bar
+export method createSeriesTest(Unit this, string name, int sinceBar = na, int untilBar = na) =>
+    if na(name)
+        runtime.error("Unit.createSeriesTest: A Test must be named, but namae == na")
+    if this.containsTest(name)
+        runtime.error("Unit " + this.name + " already contains a Test with name " + name)
+    this.containedTests.push(name)
+    SeriesTest.new(this.testSession, this, name, false, true, sinceBar, untilBar)
+
+method createTestId(SeriesTest test) =>
+    string suiteName = na
+    string unitName = na
+    if not na(test.unit)
+        unitName := test.unit.name
+        if not na(test.unit.suite)
+            suiteName := test.unit.suite.name
+    TestId.new(suiteName, unitName, test.name)
+    
+method createTestResult(SeriesTest test) =>
+    createTestResult(test.createTestId(), true)
+
+// @function If true, all tests this Test are not executed
+export method setIgnore(SeriesTest this, bool ignore) =>
+    this.ignore := ignore
+    this
+
+// @function Deactivates the execution of all tests of this Test
+export method ignore(SeriesTest this) =>
+    this.setIgnore(true)
+    this
+
+method isIgnored(SeriesTest this) =>
+    ignored = this.ignore
+    if not na(this.unit)
+        if this.unit.isIgnored()
+            ignored := true
+        if not na(this.unit.suite)
+            if this.unit.suite.isIgnored()
+                ignored := true
+    ignored
+
+// @function Configures Sets the earliest Bar on which this Test is executed. Counting begins at 1
+export method sinceBar(SeriesTest this, int sinceBar) =>
+    if sinceBar < 1
+        runtime.error("SeriesTest.untilBar: sinceBar must by at least 1, but " + str.tostring(sinceBar) + " given")
+    this.sinceBar := sinceBar
+    this
+
+// @function Sets the Bar from which on this Test is not executed anymore. Counting begins at 1
+export method untilBar(SeriesTest this, int untilBar) =>
+    if untilBar < 1
+        runtime.error("SeriesTest.untilBar: untilBar must by at least 1, but " + str.tostring(untilBar) + " given")
+    this.untilBar := untilBar
+    this
+
+// @function Configures a Test to be only executed on the given bar. The first bar of the chart is bar number 1
+export method onBar(SeriesTest this, int bar) =>
+    if bar < 1
+        runtime.error("SeriesTest.onBar: bar number must by at least 1, but " + str.tostring(bar) + " given")
+    this.sinceBar := bar
+    this.untilBar := bar
+    this
+
+// @function Configures a Test to be only executed in a special scenario, defined by 'condition'
+export method when(SeriesTest this, bool condition) =>
+    this.when := condition
+    this
+//#endregion
+//#endregion
+
+//#region ===== Functionality 
+//#endregion
+
+method getResult(TestSession testSession, TestId testId, bool isSeries) =>
+    TestResult result = na
+    for [i, r] in testSession.results
+        if r.id.equals(testId)
+            result := r
+    if na(result)
+        result := createTestResult(testId, isSeries)
+        testSession.results.push(result)
+    result
+
+method getResult(SimpleTest test) =>
+    getResult(test.testSession, test.createTestId(), false)
+
+method getResult(SeriesTest test) =>
+    getResult(test.testSession, test.createTestId(), true)
+//#endregion
+
+//#region ===== Log Failure functions
+type StringBuilder
+    int maxLength = 4096
+    string maxLengthExceededSuffix = ""
+    string content = ""
+    bool maxLengthExceeded = false
+    bool appended = false
+
+method length(StringBuilder this) =>
+    str.length(this.content)
+
+method append(StringBuilder this, string s) =>
+    if not this.maxLengthExceeded
+        if this.length() + str.length(s) + str.length(this.maxLengthExceededSuffix) > this.maxLength
+            this.maxLengthExceeded := true
+            this.content += this.maxLengthExceededSuffix
+            this.appended := false
+        else
+            this.content += s
+            this.appended := true
+    this
+
+method hasAppended(StringBuilder this) =>
+    this.appended
+
+method toString(StringBuilder this) =>
+    this.content
+
+method clear(StringBuilder this) =>
+    this.content := ""
+    this.maxLengthExceeded := false
+    this
+
+method flush(StringBuilder this) =>
+    string result = this.toString()
+    this.clear()
+    result
+
+accuracy(string interval) =>
+    if str.contains(interval, "S")
+        "s"
+    else if interval == "D"
+        "D"
+    else if interval == "W"
+        "W"
+    else if interval == "M"
+        "M"
+    else
+        int minutes = math.round(str.tonumber(interval))
+        if minutes % 60 == 0
+            "h"
+        else
+            "m"
+
+accuracyWeight(string accuracy) =>
+    switch accuracy
+        "s" => 0
+        "m" => 1
+        "h" => 2
+        "D" => 3
+        "W" => 4
+        "M" => 5
+
+displayedAccuracy() =>
+    accuracy(timeframe.period)
+
+twoDigitString(int value) =>
+    (value < 10 ? "0" : "") + str.tostring(value)
+
+bartimeToString(string timezone, int t) =>
+    weight = accuracyWeight(displayedAccuracy())
+    result = str.tostring(year(t, timezone))
+    if weight <= 5
+        result += "-" + twoDigitString(month(t, timezone))
+    if weight <= 4
+        result += "-" + twoDigitString(dayofmonth(t, timezone))
+    if weight <= 2
+        result += " " + twoDigitString(hour(t, timezone)) + ":" + twoDigitString(minute(t, timezone))
+    if weight <= 0
+        result += ":" + twoDigitString(second(t, timezone))
+    result
+
+timestampSecond(string timezone, int year, int month, int day, int hour, int minute, int second) =>
+    timestamp(timezone, year, month, day, hour, minute, second)
+
+timeToStringIncMillis(string timezone, int t) =>
+    timestampSecond = timestampSecond(timezone, year(t), month(t), dayofmonth(t), hour(t), minute(t), second(t))
+    millis = t - timestampSecond
+    bartimeToString(timezone, t) + ":" + 
+      str.tostring(second(t, timezone)) + "." +
+      str.substring(str.tostring(millis), 0, 3)
+
+canConcatenate(string s0, string s1) =>
+    str.length(s0) + str.length(s1) < 4000
+
+concat(string s0, string s1) =>
+    r0 = s0
+    r1 = s1
+    concatenated = canConcatenate(s0, s1)
+    if concatenated
+        r0 += s1
+        r1 := ""
+    [r0, r1, concatenated]
+
+method getMessagesText(TestFailure failure) =>
+    builder = StringBuilder.new()
+    builder.maxLengthExceededSuffix := "\nAnd more ..."
+    bool first = true
+    for [i, m] in failure.messages
+        if first
+            first := false
+        else
+            builder.append("\n")
+        builder.append(m)
+    builder.toString()
+
+getLogText(string timezone, int barIndex, int stamp, string message) =>
+    (na(barIndex) ? "" :"[" + str.tostring(barIndex) + " | " + bartimeToString(timezone, stamp) + "]\n") + message
+
+getLogText(string timezone, TestFailure failure) =>
+    getLogText(timezone, failure.barIndex, failure.stamp, failure.getMessagesText())
+
+method createFailuresText(TestResult this, string timezone, bool logBar) =>
+    builder = StringBuilder.new()
+    builder.maxLengthExceededSuffix := "And more ..."
+    linebreak = false
+    for [i, f] in this.failures
+        if linebreak
+            builder.append("\n")
+        else
+            linebreak := true
+        if this.isSeries and logBar
+            builder.append("[Bar " + str.tostring(f.barIndex) + " at "  + bartimeToString(timezone, f.stamp) + "]\n")
+        builder.append(f.getMessagesText())
+    builder.toString()
+//#endregion
+
+//#region ===== Assertions 
+//#region === Helper funcions 
+messagePrefix(string message) =>
+    na(message) ? "" : message + " ==> "
+
+valueToString(bool value) =>
+    (na(value) ? "na" : "<" + str.tostring(value) + ">")
+
+valueToString(int value) =>
+    (na(value) ? "na" : "<" + str.tostring(value) + ">")
+
+valueToString(float value) =>
+    (na(value) ? "na" : "<" + str.tostring(value) + ">")
+
+valueToString(string value) =>
+    (na(value) ? "na" : "<" + value + ">")
+
+expectedButWas(string expected, string actual, string message) =>
+    messagePrefix(message) + "expected: " + valueToString(expected) + ", but was " + valueToString(actual)
+
+expectedButWas(bool expected, bool actual, string message) =>
+    messagePrefix(message) + "expected: " + valueToString(expected) + ", but was " + valueToString(actual)
+
+expectedButWas(int expected, int actual, string message) =>
+    messagePrefix(message) + "expected: " + valueToString(expected) + ", but was " + valueToString(actual)
+
+expectedButWas(float expected, float actual, string message) =>
+    messagePrefix(message) + "expected: " + valueToString(expected) + ", but was " + valueToString(actual)
+
+expectedNotButWas(string expected, string message) =>
+    messagePrefix(message) + "expected: " + valueToString(expected)
+
+expectedNotButWas(bool expected, string message) =>
+    messagePrefix(message) + "expected: " + valueToString(expected)
+
+expectedNotButWas(int expected, string message) =>
+    messagePrefix(message) + "expected: " + valueToString(expected)
+
+expectedNotButWas(float expected, string message) =>
+    messagePrefix(message) + "expected: " + valueToString(expected)
+
+method assert(SimpleTest test, bool condition, string message) =>
+    TestResult result = test.getResult()
+    if test.testSession.active and barstate.isfirst
+        if test.isIgnored()
+            result.state := Ignored()
+        else if condition
+            if not result.state.isFailure()
+                result.state := Success()
+        else
+            result.state := Failure()
+            failure = result.getOrCreateCurrentFailure()
+            failure.messages.push(message)
+    test
+
+method assert(SeriesTest test, bool condition, string message) =>
+    TestResult result = test.getResult()
+    if test.testSession.active
+        if test.isIgnored()
+            if barstate.isfirst
+                result.state := Ignored()
+        else if not barstate.islast and test.when
+          and (na(test.untilBar) or bar_index < test.untilBar - 1)
+          and (na(test.sinceBar) or bar_index >= test.sinceBar - 1)
+            if condition 
+                if not result.state.isFailure()
+                    result.state := Success()
+            else 
+                failure = result.getCurrentFailure()
+                if not na(failure)
+                    failure.messages.push(message)
+                    log.error(test.createTestId().toString() + "\n" + message)
+                else if result.failures.size() < test.testSession.maxFailingBars
+                    failure := TestFailure.new(bar_index, time, array.new_string())
+                    result.state := Failure()
+                    failure.messages.push(message)
+                    result.failures.push(failure)
+                    log.error(test.createTestId().toString() + "\n" + message)
+    test
+//#endregion
+
+//#region === AssertTrue/False
+// @function Asserts if a condition is true. If a 'when' scenario is given and this scenario is not met, the assertion is bypassed and yields no result.
+export method assertTrue(SimpleTest test, bool condition, string message = na) =>
+    test.assert(condition, expectedButWas(true, condition, message))
+
+// @function Asserts if a condition is true. If a 'when' scenario is given and this scenario is not met, the assertion is bypassed and yields no result.
+export method assertTrue(SeriesTest test, bool condition, string message = na) =>
+    test.assert(condition, expectedButWas(true, condition, message))
+
+// @function Asserts if a condition is false. If a 'when' scenario is given and this scenario is not met, the assertion is bypassed and yields no result.
+export method assertFalse(SimpleTest test, bool condition, string message = na) =>
+    test.assert(not condition, expectedButWas(false, condition, message))
+
+// @function Asserts if a condition is false. If a 'when' scenario is given and this scenario is not met, the assertion is bypassed and yields no result.
+export method assertFalse(SeriesTest test, bool condition, string message = na) =>
+    test.assert(not condition, expectedButWas(false, condition, message))
+//#endregion
+
+//#region === NA 
+// @function Asserts that a bool value is na
+export method assertNa(SimpleTest test, bool actual, string message = na) =>
+    test.assert(na(actual), expectedButWas(na, actual, message))
+
+// @function Asserts that a bool value is na
+export method assertNa(SeriesTest test, bool actual, string message = na) =>
+    test.assert(na(actual), expectedButWas(na, actual, message))
+
+// @function Asserts that an integer value is na
+export method assertNa(SimpleTest test, int actual, string message = na) =>
+    test.assert(na(actual), expectedButWas(na, actual, message))
+
+// @function Asserts that an integer value is na
+export method assertNa(SeriesTest test, int actual, string message = na) =>
+    test.assert(na(actual), expectedButWas(na, actual, message))
+
+// @function Asserts that a float is na
+export method assertNa(SimpleTest test, float actual, string message = na) =>
+    test.assert(na(actual),  expectedButWas(na, actual, message))
+
+// @function Asserts that a float is na
+export method assertNa(SeriesTest test, float actual, string message = na) =>
+    test.assert(na(actual), expectedButWas(na, actual, message))
+
+// @function Asserts that a string is na
+export method assertNa(SimpleTest test, string actual, string message = na) =>
+    test.assert(na(actual), expectedButWas(na, actual, message))
+
+// @function Asserts that a string is na
+export method assertNa(SeriesTest test, string actual, string message = na) =>
+    test.assert(na(actual), expectedButWas(na, actual, message))
+//#endregion
+
+//#region === Not NA 
+// @function Asserts that a bool value is na
+export method assertNotNa(SimpleTest test, bool actual, string message = na) =>
+    test.assert(not na(actual), expectedNotButWas(actual, message))
+
+// @function Asserts that a bool value is na
+export method assertNotNa(SeriesTest test, bool actual, string message = na) =>
+    test.assert(not na(actual), expectedNotButWas(actual, message))
+
+// @function Asserts that an integer value is na
+export method assertNotNa(SimpleTest test, int actual, string message = na) =>
+    test.assert(not na(actual), expectedNotButWas(actual, message))
+
+// @function Asserts that an integer value is na
+export method assertNotNa(SeriesTest test, int actual, string message = na) =>
+    test.assert(not na(actual), expectedNotButWas(actual, message))
+
+// @function Asserts that a float is na
+export method assertNotNa(SimpleTest test, float actual, string message = na) =>
+    test.assert(not na(actual), expectedNotButWas(actual, message))
+
+// @function Asserts that a float is na
+export method assertNotNa(SeriesTest test, float actual, string message = na) =>
+    test.assert(not na(actual), expectedNotButWas(actual, message))
+
+// @function Asserts that a string is na
+export method assertNotNa(SimpleTest test, string actual, string message = na) =>
+    test.assert(not na(actual), expectedNotButWas(actual, message))
+
+// @function Asserts that a string is na
+export method assertNotNa(SeriesTest test, string actual, string message = na) =>
+    test.assert(not na(actual), expectedNotButWas(actual, message))
+//#endregion
+
+//#region === Equals 
+// @function Asserts that two boolean values are equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertEquals(SimpleTest test, bool expected, bool actual, string message = na) =>
+    test.assert(equalsNa(expected, actual), expectedButWas(expected, actual, message))
+
+export method assertEquals(SeriesTest test, bool expected, bool actual, string message = na) =>
+    test.assert(equalsNa(expected, actual), expectedButWas(expected, actual, message))
+
+// @function Asserts that two integer values are equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertEquals(SimpleTest test, int expected, int actual, string message = na) =>
+    test.assert(equalsNa(expected, actual), expectedButWas(expected, actual, message))
+
+// @function Asserts that two integer values are equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertEquals(SeriesTest test, int expected, int actual, string message = na) =>
+    test.assert(equalsNa(expected, actual), expectedButWas(expected, actual, message))
+
+// @function Asserts that two float values are equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertEquals(SimpleTest test, float expected, float actual, string message = na) =>
+    test.assert(equalsNa(expected, actual), expectedButWas(expected, actual, message))
+
+// @function Asserts that two float values are equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertEquals(SeriesTest test, float expected, float actual, string message = na) =>
+    test.assert(equalsNa(expected, actual), expectedButWas(expected, actual, message))
+
+// @function Asserts that two string values are equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertEquals(SimpleTest test, string expected, string actual, string message = na) =>
+    test.assert(equalsNa(expected, actual), expectedButWas(expected, actual, message))
+
+// @function Asserts that two string values are equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertEquals(SeriesTest test, string expected, string actual, string message = na) =>
+    test.assert(equalsNa(expected, actual), expectedButWas(expected, actual, message))
+//#endregion
+
+//#region === Not Equals
+// @function Asserts that two boolean values are not equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertNotEquals(SimpleTest test, bool expected, bool actual, string message = na) =>
+    test.assert(not equalsNa(expected, actual), expectedNotButWas(expected, message))
+
+export method assertNotEquals(SeriesTest test, bool expected, bool actual, string message = na) =>
+    test.assert(not equalsNa(expected, actual), expectedNotButWas(expected, message))
+
+// @function Asserts that two integer values are not equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertNotEquals(SimpleTest test, int expected, int actual, string message = na) =>
+    test.assert(not equalsNa(expected, actual), expectedNotButWas(expected, message))
+
+// @function Asserts that two integer values are not equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertNotEquals(SeriesTest test, int expected, int actual, string message = na) =>
+    test.assert(not equalsNa(expected, actual), expectedNotButWas(expected, message))
+
+// @function Asserts that two float values are not equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertNotEquals(SimpleTest test, float expected, float actual, string message = na) =>
+    test.assert(not equalsNa(expected, actual), expectedNotButWas(expected, message))
+
+// @function Asserts that two float values are not equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertNotEquals(SeriesTest test, float expected, float actual, string message = na) =>
+    test.assert(not equalsNa(expected, actual), expectedNotButWas(expected, message))
+
+// @function Asserts that two string values are not equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertNotEquals(SimpleTest test, string expected, string actual, string message = na) =>
+    test.assert(not equalsNa(expected, actual), expectedNotButWas(expected, message))
+
+// @function Asserts that two string values are not equal, considering an optional precondition. If the precondition is not met or is not provided, the test is automatically considered successful.
+export method assertNotEquals(SeriesTest test, string expected, string actual, string message = na) =>
+    test.assert(not equalsNa(expected, actual), expectedNotButWas(expected, message))
+//#endregion
+
+//#region === Array Equals 
+// @function Asserts if two arrays are equal. 
+export method assertArrayEquals(SimpleTest test, array<bool> expected, array<bool> actual, string message = na) =>
+    test.assert(arrayEqualsNa(expected, actual),messagePrefix(message) + " expected: <"+ str.tostring(expected) + "> but was: <" + str.tostring(actual) + ">")
+
+// @function Asserts if two arrays are equal. 
+export method assertArrayEquals(SeriesTest test, array<bool> expected, array<bool> actual, string message = na) =>
+    test.assert(arrayEqualsNa(expected, actual),messagePrefix(message) + " expected: <"+ str.tostring(expected) + "> but was: <" + str.tostring(actual) + ">")
+
+// @function Asserts if two arrays are equal. 
+export method assertArrayEquals(SimpleTest test, array<int> expected, array<int> actual, string message = na) =>
+    test.assert(arrayEqualsNa(expected, actual),messagePrefix(message) + " expected: <"+ str.tostring(expected) + "> but was: <" + str.tostring(actual) + ">")
+
+// @function Asserts if two arrays are equal. 
+export method assertArrayEquals(SeriesTest test, array<int> expected, array<int> actual, string message = na) =>
+    test.assert(arrayEqualsNa(expected, actual),messagePrefix(message) + " expected: <"+ str.tostring(expected) + "> but was: <" + str.tostring(actual) + ">")
+
+// @function Asserts if two arrays are equal. 
+export method assertArrayEquals(SimpleTest test, array<float> expected, array<float> actual, string message = na) =>
+    test.assert(arrayEqualsNa(expected, actual),messagePrefix(message) + " expected: <"+ str.tostring(expected) + "> but was: <" + str.tostring(actual) + ">")
+
+// @function Asserts if two arrays are equal. 
+export method assertArrayEquals(SeriesTest test, array<float> expected, array<float> actual, string message = na) =>
+    test.assert(arrayEqualsNa(expected, actual),messagePrefix(message) + " expected: <"+ str.tostring(expected) + "> but was: <" + str.tostring(actual) + ">")
+
+// @function Asserts if two arrays are equal. 
+export method assertArrayEquals(SimpleTest test, array<string> expected, array<string> actual, string message = na) =>
+    test.assert(arrayEqualsNa(expected, actual),messagePrefix(message) + " expected: <"+ str.tostring(expected) + "> but was: <" + str.tostring(actual) + ">")
+
+// @function Asserts if two arrays are equal. 
+export method assertArrayEquals(SeriesTest test, array<string> expected, array<string> actual, string message = na) =>
+    test.assert(arrayEqualsNa(expected, actual),messagePrefix(message) + " expected: <"+ str.tostring(expected) + "> but was: <" + str.tostring(actual) + ">")
+//#endregion
+
+//#region === Array Not Equals 
+// @function Asserts if two arrays are not equal. 
+export method assertArrayNotEquals(SimpleTest test, array<bool> expected, array<bool> actual, string message = na) =>
+    test.assert(not arrayEqualsNa(expected, actual),messagePrefix(message) + " expected not <" + str.tostring(expected) + ">")
+
+// @function Asserts if two arrays are not equal. 
+export method assertArrayNotEquals(SeriesTest test, array<bool> expected, array<bool> actual, string message = na) =>
+    test.assert(not arrayEqualsNa(expected, actual),messagePrefix(message) + " expected not <" + str.tostring(expected) + ">")
+
+// @function Asserts if two arrays are not equal. 
+export method assertArrayNotEquals(SimpleTest test, array<int> expected, array<int> actual, string message = na) =>
+    test.assert(not arrayEqualsNa(expected, actual),messagePrefix(message) + " expected not <" + str.tostring(expected) + ">")
+
+// @function Asserts if two arrays are not equal. 
+export method assertArrayNotEquals(SeriesTest test, array<int> expected, array<int> actual, string message = na) =>
+    test.assert(not arrayEqualsNa(expected, actual),messagePrefix(message) + " expected not <" + str.tostring(expected) + ">")
+
+// @function Asserts if two arrays are not equal. 
+export method assertArrayNotEquals(SimpleTest test, array<float> expected, array<float> actual, string message = na) =>
+    test.assert(not arrayEqualsNa(expected, actual),messagePrefix(message) + " expected not <" + str.tostring(expected) + ">")
+
+// @function Asserts if two arrays are not equal. 
+export method assertArrayNotEquals(SeriesTest test, array<float> expected, array<float> actual, string message = na) =>
+    test.assert(not arrayEqualsNa(expected, actual),messagePrefix(message) + " expected not <" + str.tostring(expected) + ">")
+
+// @function Asserts if two arrays are not equal. 
+export method assertArrayNotEquals(SimpleTest test, array<string> expected, array<string> actual, string message = na) =>
+    test.assert(not arrayEqualsNa(expected, actual),messagePrefix(message) + " expected not <" + str.tostring(expected) + ">")
+
+// @function Asserts if two arrays are not equal. 
+export method assertArrayNotEquals(SeriesTest test, array<string> expected, array<string> actual, string message = na) =>
+    test.assert(not arrayEqualsNa(expected, actual),messagePrefix(message) + " expected not <" + str.tostring(expected) + ">")
+//#endregion
+//#endregion
+
+//#region ===== Report results
+//#region Log Results
+type LogHelper
+    StringBuilder stringBuilder = na
+
+createLogHelper() =>
+    LogHelper.new(StringBuilder.new())
+
+method clear(LogHelper this) =>
+    this.stringBuilder.clear()
+
+method flush(LogHelper this) =>
+    log.info(this.stringBuilder.toString())
+    this.clear() 
+
+method appendLine(LogHelper this, string logLine = "") =>
+    t = (this.stringBuilder.length() > 0 ? "\n" : "") + logLine
+    if not this.stringBuilder.append(t).hasAppended()
+        this.flush()
+        this.stringBuilder.append(t)
+    this
+
+method log(LogHelper this) =>
+    log.info(this.stringBuilder.flush())
+
+method appendSuiteHeader(LogHelper this, SuiteResult result) =>
+    this.appendLine()
+      .appendLine("--------------------------------------------------------------")
+      .appendLine("T E S T S " + result.name)
+      .appendLine("--------------------------------------------------------------")
+
+method appendOverallHeader(LogHelper this) =>
+    this.appendLine()
+      .appendLine("==============================================================")
+      .appendLine("O V E R A L L")
+      .appendLine("==============================================================")
+
+logo() => 
+    "\n" +   
+      ".___. '_ ' ' ' ' ' '_ ' _ ' ' ' _ _\n" +
+      "| ._ \\(_)_ __ ' ___| | | |_ __ (_) |_ \n" +
+      "| |_) | | '_ \\ / _ \\ | | | '_ \\| | __|\n" +
+      "| .__/| | | | | .__/ |_| | | | | | |_ \n" +
+      "|_| . |_|_| |_|\\___|\\___/|_| |_|_|\\__|"
+
+createResultsText(ResultCounts counts) =>
+    "Tests run: " + str.tostring(counts.getRun())
+      + ", Failures: " + str.tostring(counts.failures)
+      + ", Not executed: " + str.tostring(counts.unexecuteds)
+      + ", Skipped: " + str.tostring(counts.ignoreds)
+
+method logResults(TestSession this) =>//SessionResult sessionResult) =>
+    sessionResult = this.createSessionResult()
+    LogHelper logHelper = createLogHelper()
+      .appendLine(logo())
+      .appendLine()
+      .appendLine("PineUnit by Guardian667. Where reliable Pine Script testing begins")
+      .appendLine()  
+      .appendLine("Above you find logs of series-based tests, evaluated on every bar. To inspect a specific bar linked to an assertion, hover over its log message and click the crosshair icon.")
+    
+    sessionCounts = sessionResult.getResultCounts()
+    for [sri, suiteResult] in sessionResult.results
+        logHelper.appendSuiteHeader(suiteResult)
+        UnitResult prevResult = na
+        for [uri, unitResult] in suiteResult.results
+            if not na(prevResult)
+                if prevResult.state.isFailure() or prevResult.state.isUnexecuted()
+                    logHelper.appendLine()
+            unitCounts = unitResult.getResultCounts()
+            logHelper
+              .appendLine("Running " + (na(unitResult.name) ? "Default Unit" : unitResult.name))
+              .appendLine(createResultsText(unitCounts) + (unitResult.state.isFailure() ? " <<< FAILURE! - in" : ""))
+            for [ri, result] in unitResult.results
+                if result.state.isUnexecuted()
+                    logHelper.appendLine()
+                      .appendLine(result.id.testName + " < NOT EXECUTED!")
+                else if result.state.isFailure()
+                    logHelper.appendLine()
+                      .appendLine(result.id.testName)
+                      .appendLine(result.createFailuresText(this.timezone, this.logBarOnSeriesTests))
+            prevResult := unitResult
+        suiteCounts = suiteResult.testCounts
+        logHelper
+          .appendLine()
+          .appendLine("Results :")
+          .appendLine(createResultsText(suiteCounts))
+    logHelper.appendOverallHeader()
+      .appendLine(createResultsText(sessionCounts))
+    logHelper.log()
+    if 0 < sessionCounts.failures and sessionCounts.failures < 3
+        log.warning("Go ahead and fix that few bugs, my friend :-)")
+    else if sessionCounts.failures > 0
+        log.warning("Go ahead and fix those bugs, my friend :-)")
+    log.info("Thanx for using PineUnit")
+//#endregion
+
+//#region Display Reuslts
+const color okTextColor = color.green
+const color okBgColor = color.rgb(45, 48, 68)
+const color failureTextColor = color.red
+const color failureBgColor = color.rgb(55, 48, 48)
+
+getTextColor(ResultState state) =>
+    state.isSuccess() ? color.green
+      : state.isFailure() ? color.red
+      : state.isIgnored() ? color.yellow
+      : state.isUnexecuted() ? color.orange
+      : color.black
+
+getBackgroundColor(ResultState state) =>
+      state.isSuccess() ? color.rgb(45, 48, 68) 
+      : state.isFailure() ? color.rgb(55, 48, 48)
+      : state.isIgnored() ? color.rgb(50, 70, 40)
+      : state.isUnexecuted() ? color.rgb(60, 60, 46) 
+      : color.black
+
+displayResult(table resultDisplay, int column, int row, string content, DisplaySettings settings, ResultState state, string tooltip = na) =>
+    table.cell(resultDisplay, column, row, content,
+      text_size=settings.textSize,
+      text_halign=text.align_left, text_valign=text.align_top,
+      text_color=getTextColor(state),
+      bgcolor=getBackgroundColor(state),
+      tooltip=tooltip)
+
+method display(TestSession testSession) =>
+    displaySettings = testSession.displaySettings
+    unfilteredResult = testSession.createSessionResult()
+    unfilteredCounts = unfilteredResult.getResultCounts()
+    sessionResult = testSession.getFilteredResults(unfilteredResult)
+    counts = sessionResult.getResultCounts()
+    bool displaySuites = false
+    bool displayUnits = false
+    for [si, sr] in sessionResult.results
+        if not na(sr.name)
+            displaySuites := true
+        for [ui, ur] in sr.results
+            if not na(ur.name)
+                displayUnits := true
+    columnCount = 1
+    if displaySuites
+        columnCount += 1
+    if displayUnits
+        columnCount += 1
+    rowCount = 1 + counts.getCount()
+    
+    table resultDisplay = table.new(testSession.displaySettings.position, columnCount, rowCount, bgcolor = color.rgb(0,0,0,100), frame_width = 0, border_width=1, frame_color = color.rgb(0,0,0,100))
+    table.merge_cells(resultDisplay, 0, 0, columnCount-1, 0)
+    displayResult(resultDisplay, 0, 0, createResultsText(unfilteredCounts), testSession.displaySettings, unfilteredResult.state)
+    nextRowIndex = 1
+    for [si, sr] in sessionResult.results
+        sCounts = sr.testCounts
+        if displaySuites
+            if sCounts.getCount() > 1
+                table.merge_cells(resultDisplay, 0, nextRowIndex, 0, nextRowIndex + sCounts.getCount() - 1)
+            displayResult(resultDisplay, 0, nextRowIndex, sr.name, testSession.displaySettings, sr.state)
+        for [ui, ur] in sr.results
+            uCounts = ur.getResultCounts()
+            if displayUnits
+                if uCounts.getCount() > 1
+                    table.merge_cells(resultDisplay, columnCount-2, nextRowIndex, columnCount-2, nextRowIndex + uCounts.getCount() - 1)//displayedTrCount - 1)
+                displayResult(resultDisplay, columnCount-2, nextRowIndex, ur.name, testSession.displaySettings, ur.state)
+            for [ti, tr] in ur.results
+                failureLog = tr.createFailuresText(testSession.timezone, testSession.logBarOnSeriesTests)
+                displayResult(resultDisplay, columnCount-1, nextRowIndex, tr.id.testName, testSession.displaySettings, tr.state, failureLog)
+                nextRowIndex += 1
+//#endregion
+
+// @function Displays the test results if the TestSession is active. See TestSession for configuring how results are deisplayed
+export method report(TestSession testSession) =>
+    if testSession.active and barstate.islastconfirmedhistory
+        testSession.logResults()
+        if testSession.displaySettings.show
+            testSession.display()
+    testSession
+//#endregion
+
+//#region ===== Demo 
+//#region Create and configure Your TestSession
+var testSession = createTestSession()
+//   .setActive(false)
+//   .deactivate()
+//   .setMaxFailingBars(3)
+  .setTimezone("Europe/Berlin")
+//   .setLogBarOnSeriesTests(true)
+
+var displaySettings = testSession.displaySettings
+//   .setShow(false)
+//   .hide()
+//   .setPosition(position.bottom_center)
+//   .setTextSize(size.normal)
+//   .setShowSuccess(false)
+//   .hideSuccess()
+//   .setShowFailure(false)
+//   .showOnlyFailures()
+//   .setShowIgnored(false)
+//   .hideIgnored()
+//   .setShowUnexecuted(false)
+//   .hideUnexecuted()
+//#endregion
+
+//#region Create Tests and organise them
+var trueTest = testSession.createSimpleTest("True is always True")
+trueTest.assertTrue(true)
+
+var bullTest = testSession.createSeriesTest("It's allways Bull Market")
+bullTest.assertTrue(close > open, "Uhoh... it's not always bullish")
+
+var universeUnit = testSession.createUnit("Universe Unit")
+var universeTest = universeUnit.createSimpleTest("Is 42 actually 42?")
+universeTest.assertEquals(42, 42, "Uhoh... the universe is borken!")
+
+var piSuite = testSession.createSuite("Pi (We love ya!)")
+var piUnit = piSuite.createUnit("Pi Unit")
+var piTest = piUnit.createSimpleTest("Pi should begin correctly")
+piTest.assertTrue(str.startswith(str.tostring(math.pi), "3"), "The first digit of Pi is not three!")
+//#endregion
+
+//#region Test series-based functions on each bar
+highest(int length) =>
+    highest = 0.0
+    for i = 0 to length-1 by 1
+        highest := (high[i] > highest) ? high[i] : highest
+    highest
+
+var highestUnit = testSession.createUnit("Highest")
+// var highestOfLastThreeTest = highestUnit.createSeriesTest("Should calculate highest of last three bars")
+var highestOfLastThreeTest = highestUnit.createSeriesTest("Should calculate highest of last three bars").sinceBar(3)
+highestOfLastThreeTest.assertEquals(math.max(high, high[1], high[2]), highest(3), "That is not the highest price of the last three bars")
+
+// var highestNaOnFirstBarsTest = highestUnit.createSeriesTest("Should return na on first bars")
+var highestNaOnFirstBarsTest = highestUnit.createSeriesTest("Should return na on first bars").untilBar(3)
+highestNaOnFirstBarsTest.assertNa(highest(3))
+//#endregion
+
+// //#region Multiple Assertions within one single Test
+averagePrice(int maLength) =>
+    avg = (open + high + low) / 4
+    avgDiff = avg - close
+    [avg, avgDiff]
+    
+[actualAverage, actualDiff] = averagePrice(21)
+var averageUnit = testSession.createUnit("Average Price")
+var averagePriceTest = averageUnit.createSeriesTest("Should calculate")
+averagePriceTest.assertEquals(math.avg(open, high, low, close), actualAverage, "Wrong Average")
+averagePriceTest.assertEquals(math.avg(open, high, low, close) - close, actualDiff, "Wrong Diff")
+// //#endregion
+
+// //#region Define "When" Conditions for Tests
+momentum() =>
+    direction = close > open ? "Up" : close < open ? "Down" : "Side"
+    diff = close - open
+    [direction, diff]
+
+var momentumUnit = testSession.createUnit("Momentum")
+[direction, diff] = momentum()
+
+var momentumUpTest = momentumUnit.createSeriesTest("Up")
+momentumUpTest.when(close > open)
+momentumUpTest.assertEquals("Up", direction, "Wrong direction")
+momentumUpTest.assertEquals(close - open, diff, "Wrong distance")
+
+var momentumDownTest = momentumUnit.createSeriesTest("Down")
+momentumDownTest.when(close < open)
+momentumDownTest.assertEquals("Down", direction, "Wrong direction")
+momentumDownTest.assertEquals(open - close, diff, "Wrong distance")
+
+var momentumSideTest = momentumUnit.createSeriesTest("Side")
+momentumSideTest.when(close == open)
+momentumSideTest.assertEquals("Side", direction, "Wrong direction")
+momentumSideTest.assertEquals(0, diff, "Wrong distance")
+// //#endregion
+
+// //#region
+var ignoredTest = testSession.createSimpleTest("Ignored Test").ignore()
+ignoredTest.assertTrue(true)
+
+var ignoredUnit = testSession.createUnit("Ignored Unit").ignore()
+var unignoredTestInIgnoredUnit = ignoredUnit.createSimpleTest("Unignored")
+unignoredTestInIgnoredUnit.assertTrue(true)
+
+var ignoredSuite = testSession.createSuite("Ignored Suite").ignore()
+var unignoredUnitInIgnoredSuite = ignoredSuite.createUnit("Unignored Unit")
+var unignoredTestInIgnoredSuite = unignoredUnitInIgnoredSuite.createSimpleTest("Unignored")
+unignoredTestInIgnoredSuite.assertTrue(true)
+// //#endregion
+
+// //#region Difference between ignored and unexecuted testsne
+var ignoreAndUnexecuteUnit = testSession.createUnit("IgnoreAndUnexecuteUnit")
+
+var myIgnoredTest = ignoreAndUnexecuteUnit.createSeriesTest("My Ignored Test")
+myIgnoredTest.ignore()
+myIgnoredTest.assertTrue(false)
+
+var myUnexecutedTest = ignoreAndUnexecuteUnit.createSeriesTest("My Unexecuted Test")
+myUnexecutedTest.when(false)
+myUnexecutedTest.assertTrue(false)
+// //#endregion
+
+testSession.report()
+//#endregion
